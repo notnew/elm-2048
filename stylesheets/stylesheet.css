@@ -372,6 +372,8 @@ footer a:hover {
 
 .app {
     width: 600px;
-    margin-left: 20px;
-    height: 400px;
+    height: 600px;
+    font-family: 'Chivo', 'Helvetica Neue', Helvetica, Arial, serif;
+    text-shadow: none;
+    color: #101010;
 }
