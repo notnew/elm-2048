@@ -1,5 +1,6 @@
 import Board
-import Board ( slide, addTile, toElem, rowPoints, isStart, isDone )
+import Board ( slide, addTile, toElem, rowPoints, isStart, isDone, stabalize
+             , progress )
 import Direction as Dir
 import Direction (..)
 import Style (message)
@@ -19,18 +20,21 @@ data Hole = Hole
 type Game = {brd : Board.Board, score : Board.Score}
 
 -- Update
-data Event = Slide Dir.Direction [Float] | Restart [Float]
+data Event = Slide Dir.Direction [Float] | Restart [Float] | Animate Time
+
+duration = 400 * millisecond
 
 step : Event -> Game -> Game
-step ev = case ev of
-            Slide dir rands -> stepGame (dir, rands)
-            Restart rands   -> always <| newGame rands
+step ev g = case ev of
+              Slide dir rands -> stepGame (dir, rands) g
+              Restart rands   -> newGame rands
+              Animate dt      -> { g | brd <- progress (dt/duration) g.brd }
 
 stepGame : (Dir.Direction, [Float]) -> Game -> Game
 stepGame (dir, rands) ({brd, score} as g) =
     if | isStart brd -> newGame rands
        | otherwise -> let (pts, brd') = slide dir brd
-                      in if brd' == brd then g
+                      in if brd' == stabalize brd then g
                             else {g | brd <- addTile (head rands) brd'
                                     , score <- score + pts}
 
@@ -40,11 +44,18 @@ newGame (r1::r2::_) = { brd = Board.default |> addTile r1 |> addTile r2
 
 -- Input
 eventS : Signal Event
-eventS = let rand s = Random.floatList (sampleOn s <| constant 2)
+eventS = let restarts = merge (rand restartS.signal) (rand <| key 'r')
+             rand s = Random.floatList (sampleOn s <| constant 2)
              key c = keepIf id False <| Keyboard.isDown <| Char.toCode c
-         in merges [ Restart <~ rand restartS.signal
-                   , Restart <~ rand (key 'r')
-                   , Slide <~ dir ~ rand dir ]
+             framerate = 15
+             dts = snd <~ (foldp (\t (prev, _) -> (t, t-prev))
+                                 (0,0)  <| every interval)
+             animate = merge (since delay dir) (since delay restarts)
+             interval = 1 * second / framerate
+             delay = duration + interval
+         in merges [ Restart <~ restarts
+                   , Slide <~ dir ~ rand dir
+                   , Animate <~ keepWhen animate 0 dts ]
 
 restartS = input ()
 

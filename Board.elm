@@ -4,17 +4,17 @@ import Direction (..)
 import Style (message)
 
 type Board = [[Tile]]
-data Tile = Blank | Numbered Int
+data Tile = Blank | Static Int | Spawn Float Int
 type Score = Int
 
 tileCount = 4
 
 default : Board
 default =  repeat 4 <| repeat 4 <| Blank
--- default= [ [Numbered 2, Numbered 32, Numbered 64, Blank]
---          , [Numbered 4, Numbered 512, Numbered 2048, Blank]
---          , [Numbered 8, Numbered 1024, Numbered 256, Blank]
---          , [Numbered 16, Numbered 128, Blank, Blank]]
+-- default= [ [Static 2, Static 32, Static 64, Blank]
+--          , [Static 4, Static 512, Static 2048, Blank]
+--          , [Static 8, Static 1024, Static 256, Blank]
+--          , [Static 16, Static 128, Blank, Blank]]
 
 isStart : Board -> Bool
 isStart = isEmpty
@@ -27,13 +27,17 @@ isDone brd = let blanks =  sum .  map (length . filter isBlank)
                    | otherwise                                -> False
 
 tileVal : Tile -> Int
-tileVal t = case t of (Numbered n) -> n
-                      _ -> 0
+tileVal t = case t of Static n  -> n
+                      Spawn _ n -> n
 
 isBlank : Tile -> Bool
 isBlank tile = case tile of Blank -> True
                             _     -> False
 
+stabalize : Board -> Board
+stabalize = let static t = case t of Spawn _ n -> Static n
+                                     _         -> t
+            in map (map static)
 
 -- Update
 slideRow : [Tile] -> (Score, [Tile])
@@ -41,9 +45,9 @@ slideRow ts =
     let go : [Int] -> (Score, [Tile])
         go ns = if | hasTwo ns && head ns == head (tail ns) ->
                       let sum = 2* head ns
-                      in cons (sum, Numbered sum) <|  go (tail <| tail ns)
+                      in cons (sum, Static sum) <|  go (tail <| tail ns)
                    | isEmpty ns -> (0, [])
-                   | otherwise  -> cons (0, Numbered <| head ns) <| go (tail ns)
+                   | otherwise  -> cons (0, Static <| head ns) <| go (tail ns)
         vals = filter (not . isBlank) ts |> map tileVal
         pad ts = ts ++ repeat 4 Blank |> take tileCount
         hasTwo xs = case xs of (_::_::_) -> True
@@ -64,7 +68,7 @@ slide dir =
 
 addTile : Float -> Board -> Board
 addTile rand brd =
-    let newTile = Numbered <| if fourP then 4 else 2
+    let newTile = Spawn 0 <| if fourP then 4 else 2
         idx = truncate <| rand * toFloat blankCount
         insert : Int -> [Tile] -> Board -> Board
         insert i row brd = case (i, brd) of
@@ -72,11 +76,19 @@ addTile rand brd =
             (0, ((Blank::ts)::tss)) -> (row ++ newTile::ts) :: tss
             (_, ((Blank::ts)::tss)) -> insert (i-1) (row ++ [Blank]) (ts::tss)
             (_, (t::ts)::tss)       -> insert i (row++[t]) (ts::tss)
-            (_, [])                 -> let t = Numbered idx in [[t,t,t]] -- error
+            (_, [])                 -> let t = Static idx in [[t,t,t]] -- error
         countBlanks = foldl (\t sum -> if isBlank t then (1+sum) else sum) 0
         blankCount = sum <| map countBlanks brd
         fourP = truncate (rand * 100) `mod` 10 == 0
-    in insert idx [] brd
+    in if blankCount == 0 then brd else insert idx [] brd
+
+progress : Float -> Board -> Board
+progress df = let prog t = case t of
+                     Spawn f n -> let f' = f + df
+                                  in if | f' < 1    -> Spawn f' n
+                                        | otherwise -> Static n
+                     _         -> t
+              in map (map prog)
 
 -- Display
 showTile : Int -> Tile -> Element
@@ -88,7 +100,9 @@ showTile sz t =
                  phi = turns <| (2/3) - clamp fraction
                  clamp f = 2/3 * (f - (1/2) * toFloat (truncate f))
              in hsl phi (fraction/3) (linterp fraction 0.7 0.6)
-    in message sz ((1-h)/2) h bg s
+        scale = case t of Spawn f _ -> linterp f 0.3 1
+                          _         -> 1.0
+    in message (truncate <| toFloat sz*scale) ((1-h)/2) h bg s
 
 toElem : Int -> Board -> Element
 toElem sz brd =
